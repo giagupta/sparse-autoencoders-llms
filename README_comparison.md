@@ -1,217 +1,131 @@
-# Archetypal vs Standard SAE Comparison
+# Archetypal SAE Experiment: Replicating Fel et al. (2025) in Language
 
-## Overview
+## Paper
 
-This pipeline compares **Archetypal SAEs** (your implementation) against **Standard SAEs** on interpretability metrics, specifically **monosemanticity**.
+**"Archetypal SAE: Adaptive and Stable Dictionary Learning for Concept Extraction in Large Vision Models"**
+Fel, Lubana, Prince, Kowal, Boutin, Papadimitriou, Wang, Wattenberg, Ba, Konkle.
+ICML 2025. [arXiv:2502.12892](https://arxiv.org/abs/2502.12892)
 
-### What is Monosemanticity?
+## What This Experiment Does
 
-A feature is **monosemantic** if it consistently represents a single, coherent semantic concept. We measure this through:
+Replicates the Archetypal SAE method in the **language model regime** (GPT-2)
+instead of vision models, to test whether the archetypal regularization
+improves dictionary stability and feature quality for LLM interpretability.
 
-1. **Token Entropy**: Does the feature fire on diverse tokens? (High entropy = polysemantic)
-2. **Activation Consistency**: Is the activation strength consistent across instances? (High variance = inconsistent)
-3. **Combined Score**: Lower is better for both metrics
+### Key Question
+
+> Does constraining SAE dictionary atoms to the convex hull of data centroids
+> improve the stability and interpretability of learned features in language models?
+
+## Method: Relaxed Archetypal SAE (RA-SAE)
+
+The core idea from the paper:
+
+```
+Standard SAE:    D = learned freely (unconstrained)
+Archetypal SAE:  D = W @ C + Lambda
+
+Where:
+  C      = K-means centroids of model activations (frozen)
+  W      = row-stochastic matrix (non-negative, rows sum to 1)
+  Lambda = small relaxation matrix, ||Lambda_i||_2 <= delta per row
+  D_final = D * exp(multiplier)  (learnable scalar scaling)
+```
+
+Both SAEs use **TopK activation** for sparsity (not L1 penalty).
 
 ## File Structure
 
 ```
-standard_sae.py                    # Standard SAE implementation
-step2_train_standard_sae.py        # Train standard SAE
-step2_compare_monosemanticity.py   # Compute metrics for both models
-step2_visualize_comparison.py      # Generate plots and statistics
-run_full_comparison.py             # Master script (runs everything)
+Core Models:
+  archetypal_sae.py          RA-SAE with TopK (RelaxedArchetypalDictionary + ArchetypalSAE)
+  standard_sae.py            Standard TopK SAE (unconstrained baseline)
+
+Pipeline Steps:
+  step1_get_anchors.py       Extract K-means centroids from GPT-2 activations
+  step2_train_standard_sae.py  Train Standard TopK SAE
+  step3_train_sae.py         Train RA-SAE
+  step2_compare_monosemanticity.py  Evaluate reconstruction + monosemanticity
+  step2_stability_eval.py    Evaluate dictionary stability (multi-seed)
+  step2_visualize_comparison.py  Generate comparison plots
+
+Analysis:
+  step4_explore_features.py  Scan for active features
+  step5_inspect_feature.py   Deep-dive into a single feature
+  step6_visualize.py         Feature activation profile plot
+
+Orchestration:
+  run_full_comparison.py     Run the entire pipeline end-to-end
 ```
 
 ## Quick Start
 
-### Prerequisites
-
-You must have already run:
-
-- `step1_get_anchors.py` → produces `anchor_points.pt`
-- `step3_train_sae.py` → produces `archetypal_sae_weights_v2.pt`
-- Have `archetypal_sae.py` with the `ArchetypalSAE` class definition
-
-### Option 1: Run Everything at Once
-
 ```bash
+# Run everything:
 python3 run_full_comparison.py
+
+# Or step by step:
+python3 step1_get_anchors.py          # Extract K-means centroids
+python3 step2_train_standard_sae.py   # Train baseline
+python3 step3_train_sae.py            # Train RA-SAE
+python3 step2_compare_monosemanticity.py  # Evaluate
+python3 step2_stability_eval.py       # Stability test (multi-seed)
+python3 step2_visualize_comparison.py  # Generate plots
 ```
 
-This will:
+## What's Measured
 
-1. Train a standard SAE (if not already done)
-2. Extract statistics from both models
-3. Compute monosemanticity metrics
-4. Generate visualizations
-5. Print statistical comparison
+### 1. Dictionary Stability (Paper's Core Contribution)
+- Train N seeds of each architecture on identical data
+- Compare dictionaries via greedy best-match cosine similarity
+- **Higher stability = more reliable features across runs**
 
-**Time:** ~10-20 minutes depending on hardware
+### 2. Reconstruction Quality (MSE)
+- How well does each SAE reconstruct the original activations?
+- RA-SAE should match standard SAE (the relaxation parameter delta allows this)
 
-### Option 2: Run Step-by-Step
+### 3. Monosemanticity
+- **Token Entropy**: Does each feature fire on a consistent set of tokens?
+- **Activation Consistency**: Is the feature's activation strength stable?
+- Lower scores = more interpretable features
 
-```bash
-# Step 1: Train Standard SAE
-python3 step2_train_standard_sae.py
+### 4. Feature Utilization
+- How many features are active vs dead?
+- TopK ensures exactly K features fire per input
 
-# Step 2: Compute Metrics
-python3 step2_compare_monosemanticity.py
+## Configuration
 
-# Step 3: Visualize
-python3 step2_visualize_comparison.py
-```
+Key hyperparameters (consistent across both models for fair comparison):
 
-## Output Files
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Model | GPT-2 | 12-layer, 768-dim |
+| Layer | 9 | Late layer for abstract features |
+| N_Features | 4096 | 5.3x expansion |
+| TopK | 64 | ~1.5% sparsity |
+| Centroids | 4096 | K-means on activations |
+| Delta | 1.0 | RA-SAE relaxation bound |
+| LR | 3e-4 | Adam optimizer |
+| Steps | 5000 | Per training run |
+| Stability Seeds | 3 | For multi-seed eval |
 
-1. **standard_sae_weights.pt** - Trained standard SAE weights
-2. **monosemanticity_results.pt** - Raw metrics for all features
-3. **monosemanticity_comparison.png** - Histogram comparison of metrics
-4. **monosemanticity_boxplots.png** - Box plot comparison
-
-## Understanding the Results
-
-### What to Look For
-
-**If Archetypal SAE is better:**
-
-- Lower token entropy (features fire on fewer token types)
-- Lower activation consistency CoV (more stable activations)
-- Lower combined monosemanticity score
-
-**Statistical significance:**
-
-- Check p-values from t-tests (p < 0.05 is significant)
-- Check Cohen's d effect sizes (>0.5 is medium, >0.8 is large)
-
-### Example Interpretation
+## Dependencies
 
 ```
-Token Entropy (Lower = More Monosemantic):
-  Archetypal SAE: 1.523 ± 0.412
-  Standard SAE:   2.341 ± 0.687
-  t-test p=0.0001  ← Significant!
-  Cohen's d: 0.93  ← Large effect
+torch
+transformers
+datasets
+scikit-learn
+numpy
+scipy
+matplotlib
 ```
 
-This would mean: **Archetypal features are significantly more monosemantic** (they fire on fewer, more consistent token types).
+## Expected Results
 
-## Metrics Explained
+Based on the paper's findings in vision:
+- **RA-SAE should be significantly more stable** (higher cosine similarity across seeds)
+- **RA-SAE should match or nearly match standard SAE on reconstruction**
+- **RA-SAE may show improved monosemanticity** (features tied to data geometry)
 
-### 1. Token Entropy
-
-```python
-H = -Σ p(token) * log(p(token))
-```
-
-- Measures how many different token types activate a feature
-- **Low entropy** → feature fires on specific tokens (good!)
-- **High entropy** → feature fires on many different tokens (polysemantic)
-
-### 2. Activation Consistency (Coefficient of Variation)
-
-```python
-CoV = std(activations) / mean(activations)
-```
-
-- Measures stability of activation strength
-- **Low CoV** → consistent activation pattern (good!)
-- **High CoV** → erratic, context-dependent activation
-
-### 3. Monosemanticity Score
-
-```python
-Score = Token_Entropy + Activation_Consistency
-```
-
-- Combined metric (you can weight these differently)
-- **Lower is better** on both dimensions
-
-## Customization
-
-### Change Sample Size
-
-In `step2_compare_monosemanticity.py`:
-
-```python
-n_samples=500  # Increase for more robust statistics
-```
-
-### Adjust Activation Threshold
-
-In `step2_compare_monosemanticity.py`:
-
-```python
-if act_val > 0.1:  # Lower = more features included
-```
-
-### Change Metric Weights
-
-In `step2_compare_monosemanticity.py`:
-
-```python
-# Give more weight to entropy vs consistency
-mono_score = 2 * entropy + consistency
-```
-
-## For Your Paper
-
-### Key Results to Report
-
-1. **Mean monosemanticity scores** with standard deviations
-2. **Statistical significance** (t-test p-values)
-3. **Effect sizes** (Cohen's d)
-4. **Number of active features** in each model
-5. **Qualitative examples** (top monosemantic features from each)
-
-### Figures to Include
-
-- `monosemanticity_comparison.png` - Shows distribution differences
-- `monosemanticity_boxplots.png` - Shows statistical comparison
-- Plus your existing `feature_111_profile.png` as a case study
-
-### Suggested Claims (if results support)
-
-> "We compared archetypal SAEs against standard SAEs trained on identical data.
-> Archetypal features showed significantly lower token entropy (X.XX ± Y.YY vs
-> A.AA ± B.BB, p < 0.001, d = 0.XX), indicating higher monosemanticity..."
-
-## Troubleshooting
-
-### ImportError: ArchetypalSAE
-
-Make sure `archetypal_sae.py` exists and contains:
-
-```python
-class ArchetypalSAE(nn.Module):
-    def __init__(self, d_model, n_features, anchor_points):
-        ...
-```
-
-### CUDA Out of Memory
-
-Reduce batch size or use CPU:
-
-```python
-device = "cpu"  # In training scripts
-```
-
-### Not Enough Features Firing
-
-Lower the activation threshold or train longer:
-
-```python
-if act_val > 0.05:  # Lower threshold
-```
-
-## Next Steps
-
-After getting these results, you might want to:
-
-1. **Feature Steering** (Step 3) - Intervene on features during generation
-2. **Linguistic Analysis** (Step 4) - Map features to linguistic categories
-3. **Scale Up** (Step 5) - Try on larger models or more layers
-4. **Cross-lingual** (Step 6) - Test on multilingual models
-
-## Contact
-
-If you have questions about these metrics or results, feel free to ask!
+The key finding to validate: **Does the archetypal constraint transfer from vision to language?**
