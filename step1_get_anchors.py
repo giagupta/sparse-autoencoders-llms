@@ -38,15 +38,25 @@ model = GPT2Model.from_pretrained(model_name).to(device)
 model.eval()
 
 # 2. Load dataset
-print("Loading WikiText-2 (streaming mode)...")
-dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train", streaming=True)
+print("Loading WikiText-2...")
+# NOTE:
+# `streaming=True` can fail on some environments (e.g. Python 3.13 + torch shared
+# memory restrictions, or intermittent HF/httpx streaming issues). Eager loading is
+# more robust for this small dataset split.
+dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train", streaming=False)
 
 # 3. Collect activations
 print(f"Extracting Layer {LAYER} MLP activations from {N_SAMPLES} text snippets...")
 all_activations = []
 
 count = 0
-for example in dataset:
+dataset_iter = iter(dataset)
+while count < N_SAMPLES:
+    try:
+        example = next(dataset_iter)
+    except StopIteration:
+        dataset_iter = iter(dataset)
+        continue
     text = example["text"].strip()
     if len(text) < 50:
         continue
@@ -68,8 +78,6 @@ for example in dataset:
         n_vecs = sum(a.shape[0] for a in all_activations)
         print(f"  Collected from {count} snippets ({n_vecs} vectors)...")
 
-    if count >= N_SAMPLES:
-        break
 
 # Combine all activations
 print("Combining activations...")

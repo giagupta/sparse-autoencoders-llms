@@ -41,7 +41,10 @@ optimizer = optim.Adam(model.parameters(), lr=LR)
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 gpt2 = GPT2Model.from_pretrained("gpt2").to(device)
 gpt2.eval()
-dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train", streaming=True)
+# NOTE:
+# `streaming=True` can fail on some Python/torch environments due to shared
+# memory manager restrictions. Eager loading is more robust for WikiText-2.
+dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train", streaming=False)
 
 print(f"Device: {device}")
 print(f"Layer: {LAYER} | Features: {N_FEATURES} | TopK: {TOP_K}")
@@ -53,7 +56,13 @@ feature_activity = torch.zeros(N_FEATURES, device=device)
 
 # 2. Training Loop
 step = 0
-for example in dataset:
+dataset_iter = iter(dataset)
+while step < TRAINING_STEPS:
+    try:
+        example = next(dataset_iter)
+    except StopIteration:
+        dataset_iter = iter(dataset)
+        continue
     text = example["text"].strip()
     if len(text) < 100:
         continue
@@ -105,8 +114,6 @@ for example in dataset:
         )
 
     step += 1
-    if step >= TRAINING_STEPS:
-        break
 
 # 3. Save
 torch.save(model.state_dict(), "standard_sae_weights.pt")

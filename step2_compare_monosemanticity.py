@@ -86,7 +86,7 @@ def evaluate_model(model, model_name, gpt2, tokenizer, device, n_samples=500):
         'contexts': []
     })
 
-    dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", streaming=True)
+    dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", streaming=False)
 
     for i, example in enumerate(dataset):
         text = example["text"].strip()
