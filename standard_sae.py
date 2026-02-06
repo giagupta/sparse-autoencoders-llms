@@ -1,58 +1,102 @@
+"""
+Standard TopK Sparse Autoencoder (baseline, no archetypal constraints).
+
+Uses TopK activation for sparsity (matching the RA-SAE setup for fair comparison).
+This is the unconstrained baseline from the Archetypal SAE paper.
+
+Reference:
+  "Scaling and evaluating sparse autoencoders" by Gao et al., 2024.
+  https://arxiv.org/abs/2406.04093
+"""
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
 
 class StandardSAE(nn.Module):
     """
-    Standard Sparse Autoencoder (no archetypal constraints)
-    Uses the typical encoder-decoder architecture with L1 sparsity penalty
+    Standard TopK SAE without archetypal constraints.
+
+    Architecture:
+      Encode:  pre_codes = W_enc @ x + b_enc
+               codes = TopK(ReLU(pre_codes))
+      Decode:  x_hat = codes @ D
+               where D is a learned dictionary with unit-norm columns.
+
+    Parameters
+    ----------
+    d_model : int
+        Input dimension (e.g., 768 for GPT-2).
+    n_features : int
+        Number of dictionary atoms / latent features.
+    top_k : int
+        Number of top activations to keep. Default: n_features // 10.
     """
-    def __init__(self, d_model=768, n_features=4096):
+
+    def __init__(self, d_model=768, n_features=4096, top_k=None):
         super().__init__()
         self.d_model = d_model
         self.n_features = n_features
-        
+        self.top_k = top_k if top_k is not None else max(n_features // 10, 1)
+
         # Encoder: projects from model dimension to feature space
         self.encoder = nn.Linear(d_model, n_features, bias=True)
-        
-        # Decoder: projects back from feature space to model dimension
-        self.decoder = nn.Linear(n_features, d_model, bias=True)
-        
-        # Initialize decoder as transpose of encoder (tied weights is common)
-        # But we'll keep them separate for flexibility
+
+        # Decoder dictionary: (n_features, d_model) — no bias in decoder
+        self.dictionary = nn.Parameter(torch.empty(n_features, d_model))
+
         self._init_weights()
-    
+
     def _init_weights(self):
-        # Initialize with small random values
         nn.init.kaiming_uniform_(self.encoder.weight, nonlinearity='relu')
-        nn.init.kaiming_uniform_(self.decoder.weight, nonlinearity='relu')
         nn.init.zeros_(self.encoder.bias)
-        nn.init.zeros_(self.decoder.bias)
-        
-        # Normalize decoder columns to unit norm (common practice)
+        nn.init.kaiming_uniform_(self.dictionary)
+        # Normalize decoder rows to unit norm
         with torch.no_grad():
-            self.decoder.weight.data = nn.functional.normalize(
-                self.decoder.weight.data, dim=0
-            )
-    
+            self.dictionary.data = F.normalize(self.dictionary.data, dim=-1)
+
+    def encode(self, x):
+        """
+        Encode input to sparse latent codes using TopK.
+
+        Returns
+        -------
+        pre_codes : Tensor
+            Pre-activation values (before ReLU and TopK).
+        codes : Tensor
+            Sparse codes after ReLU + TopK.
+        """
+        pre_codes = self.encoder(x)
+        codes = F.relu(pre_codes)
+
+        # TopK: keep only the top_k largest activations, zero out the rest
+        topk_vals, topk_indices = torch.topk(codes, self.top_k, dim=-1)
+        codes = torch.zeros_like(codes).scatter(-1, topk_indices, topk_vals)
+
+        return pre_codes, codes
+
+    def decode(self, codes):
+        """Decode sparse codes back to input space: x_hat = codes @ D."""
+        return codes @ self.dictionary
+
     def forward(self, x):
         """
-        Args:
-            x: [batch, seq_len, d_model] - activations from transformer
-        
-        Returns:
-            reconstruction: [batch, seq_len, d_model]
-            features: [batch, seq_len, n_features] - sparse feature activations
+        Full forward pass.
+
+        Returns
+        -------
+        reconstruction : Tensor
+            Reconstructed input.
+        codes : Tensor
+            Sparse feature activations.
+        pre_codes : Tensor
+            Pre-activation values (useful for auxiliary losses).
         """
-        # Encode to feature space with ReLU for sparsity
-        features = torch.relu(self.encoder(x))
-        
-        # Decode back to original space
-        reconstruction = self.decoder(features)
-        
-        return reconstruction, features
-    
-    def get_feature_vectors(self):
-        """
-        Returns the decoder weight matrix (each column is a feature vector)
-        """
-        return self.decoder.weight.T  # [n_features, d_model]
+        pre_codes, codes = self.encode(x)
+        reconstruction = self.decode(codes)
+        return reconstruction, codes, pre_codes
+
+    def get_dictionary(self):
+        """Return the learned dictionary matrix (n_features, d_model)."""
+        return self.dictionary.data

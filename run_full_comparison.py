@@ -1,129 +1,125 @@
 #!/usr/bin/env python3
 """
-Master Script: Complete SAE Comparison Pipeline
-Runs training, evaluation, and visualization for both Archetypal and Standard SAEs
+Master Script: Complete RA-SAE vs Standard TopK SAE Comparison Pipeline.
+
+Implements the experiment from:
+  Fel et al. (2025), "Archetypal SAE: Adaptive and Stable Dictionary Learning
+  for Concept Extraction in Large Vision Models", ICML 2025.
+
+Adapted for the language model regime (GPT-2).
+
+Pipeline:
+  1. Extract K-means centroids from GPT-2 activations
+  2. Train Standard TopK SAE (baseline)
+  3. Train RA-SAE (Relaxed Archetypal SAE)
+  4. Evaluate monosemanticity and reconstruction quality
+  5. Evaluate dictionary stability across seeds
+  6. Generate comparison visualizations
 """
 
 import subprocess
 import sys
 import os
 
+
 def run_script(script_name, description):
-    """Run a Python script and handle errors"""
-    print("\n" + "=" * 70)
+    """Run a Python script and handle errors."""
+    print(f"\n{'=' * 70}")
     print(f"STEP: {description}")
-    print("=" * 70)
-    
+    print(f"{'=' * 70}")
+
     try:
         result = subprocess.run(
             [sys.executable, script_name],
             check=True,
             capture_output=False,
-            text=True
+            text=True,
         )
-        print(f"✓ {description} completed successfully")
+        print(f"[OK] {description} completed successfully")
         return True
     except subprocess.CalledProcessError as e:
-        print(f"✗ Error in {description}")
-        print(f"Script: {script_name}")
-        print(f"Return code: {e.returncode}")
+        print(f"[FAIL] Error in {description}")
+        print(f"Script: {script_name}, Return code: {e.returncode}")
         return False
     except FileNotFoundError:
-        print(f"✗ Script not found: {script_name}")
+        print(f"[FAIL] Script not found: {script_name}")
         return False
 
-def check_prerequisites():
-    """Check if required files exist"""
-    print("Checking prerequisites...")
-    
-    required_files = [
-        "anchor_points.pt",
-        "archetypal_sae_weights_v2.pt",
-        "archetypal_sae.py"
-    ]
-    
-    missing = []
-    for f in required_files:
-        if not os.path.exists(f):
-            missing.append(f)
-    
-    if missing:
-        print("\n⚠ WARNING: Missing required files:")
-        for f in missing:
-            print(f"  - {f}")
-        
-        if "archetypal_sae.py" in missing:
-            print("\n✗ CRITICAL: archetypal_sae.py is required")
-            print("Please ensure the ArchetypalSAE class definition is available")
-            return False
-        
-        if "anchor_points.pt" in missing:
-            print("\n→ Will need to run step1_get_anchors.py first")
-        
-        if "archetypal_sae_weights_v2.pt" in missing:
-            print("\n→ Will need to run step3_train_sae.py first")
-        
-        response = input("\nContinue anyway? (y/n): ")
-        if response.lower() != 'y':
-            return False
-    
-    print("✓ Prerequisites OK\n")
-    return True
 
 def main():
-    print("\n" + "=" * 70)
-    print("ARCHETYPAL vs STANDARD SAE COMPARISON PIPELINE")
-    print("=" * 70)
-    print("\nThis pipeline will:")
-    print("  1. Train a Standard SAE (matching your Archetypal SAE setup)")
-    print("  2. Compute monosemanticity metrics for both models")
-    print("  3. Generate comparison visualizations")
-    print("  4. Produce statistical analysis")
-    print("\nEstimated time: ~10-20 minutes (depending on hardware)")
-    print("=" * 70)
-    
-    if not check_prerequisites():
-        print("\n✗ Aborting pipeline")
-        return
-    
-    # Step 1: Train Standard SAE
+    print(f"\n{'=' * 70}")
+    print("RA-SAE vs STANDARD TopK SAE: FULL COMPARISON PIPELINE")
+    print("Replicating Fel et al. (2025) in the Language Model Regime")
+    print(f"{'=' * 70}")
+    print("\nPipeline steps:")
+    print("  1. Extract K-means centroids from GPT-2 Layer 9 activations")
+    print("  2. Train Standard TopK SAE (baseline)")
+    print("  3. Train RA-SAE (Relaxed Archetypal SAE)")
+    print("  4. Evaluate monosemanticity + reconstruction quality")
+    print("  5. Evaluate dictionary stability (multi-seed)")
+    print("  6. Generate comparison visualizations")
+    print(f"{'=' * 70}")
+
+    # Step 1: Extract centroids
+    if not os.path.exists("anchor_points.pt"):
+        if not run_script("step1_get_anchors.py", "Extract K-means centroids"):
+            print("\n[FAIL] Pipeline failed at centroid extraction")
+            return
+    else:
+        print("\n[OK] anchor_points.pt found, skipping centroid extraction")
+
+    # Step 2: Train Standard TopK SAE
     if not os.path.exists("standard_sae_weights.pt"):
-        print("\nStandard SAE weights not found. Training now...")
-        if not run_script("step2_train_standard_sae.py", "Training Standard SAE"):
-            print("\n✗ Pipeline failed at training step")
+        if not run_script("step2_train_standard_sae.py", "Train Standard TopK SAE"):
+            print("\n[FAIL] Pipeline failed at standard SAE training")
             return
     else:
-        print("\n✓ Standard SAE weights found, skipping training")
-    
-    # Step 2: Compare Monosemanticity
-    if not os.path.exists("monosemanticity_results.pt"):
-        if not run_script("step2_compare_monosemanticity.py", "Computing Monosemanticity Metrics"):
-            print("\n✗ Pipeline failed at evaluation step")
+        print("\n[OK] standard_sae_weights.pt found, skipping training")
+
+    # Step 3: Train RA-SAE
+    if not os.path.exists("archetypal_sae_weights_v2.pt"):
+        if not run_script("step3_train_sae.py", "Train RA-SAE"):
+            print("\n[FAIL] Pipeline failed at RA-SAE training")
             return
     else:
-        print("\n✓ Monosemanticity results found")
-        response = input("Recompute metrics? (y/n): ")
-        if response.lower() == 'y':
-            if not run_script("step2_compare_monosemanticity.py", "Computing Monosemanticity Metrics"):
-                print("\n✗ Pipeline failed at evaluation step")
-                return
-    
-    # Step 3: Visualize Results
-    if not run_script("step2_visualize_comparison.py", "Generating Visualizations"):
-        print("\n✗ Pipeline failed at visualization step")
+        print("\n[OK] archetypal_sae_weights_v2.pt found, skipping training")
+
+    # Step 4: Evaluate monosemanticity
+    if not run_script("step2_compare_monosemanticity.py", "Evaluate monosemanticity + reconstruction"):
+        print("\n[FAIL] Pipeline failed at evaluation")
         return
-    
-    # Success!
-    print("\n" + "=" * 70)
-    print("✓ PIPELINE COMPLETE!")
-    print("=" * 70)
+
+    # Step 5: Stability evaluation (optional, slower)
+    run_stability = True
+    if run_stability:
+        if not run_script("step2_stability_eval.py", "Evaluate dictionary stability (multi-seed)"):
+            print("\n[WARN] Stability evaluation failed, continuing without it")
+
+    # Step 6: Generate visualizations
+    if not run_script("step2_visualize_comparison.py", "Generate comparison visualizations"):
+        print("\n[FAIL] Pipeline failed at visualization")
+        return
+
+    # Done
+    print(f"\n{'=' * 70}")
+    print("[OK] PIPELINE COMPLETE!")
+    print(f"{'=' * 70}")
     print("\nGenerated files:")
-    print("  - standard_sae_weights.pt")
-    print("  - monosemanticity_results.pt")
-    print("  - monosemanticity_comparison.png")
-    print("  - monosemanticity_boxplots.png")
-    print("\nYou can now use these results for your paper!")
-    print("=" * 70)
+    print("  Models:")
+    print("    - anchor_points.pt              (K-means centroids)")
+    print("    - standard_sae_weights.pt       (Standard TopK SAE)")
+    print("    - archetypal_sae_weights_v2.pt  (RA-SAE)")
+    print("  Results:")
+    print("    - monosemanticity_results.pt    (monosemanticity + MSE metrics)")
+    if os.path.exists("stability_results.pt"):
+        print("    - stability_results.pt          (dictionary stability)")
+    print("  Visualizations:")
+    print("    - monosemanticity_comparison.png")
+    print("    - monosemanticity_boxplots.png")
+    if os.path.exists("stability_comparison.png"):
+        print("    - stability_comparison.png")
+    print(f"{'=' * 70}")
+
 
 if __name__ == "__main__":
     main()
