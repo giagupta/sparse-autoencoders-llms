@@ -57,13 +57,18 @@ class RelaxedArchetypalDictionary(nn.Module):
         )
 
         # Learnable multiplier for dictionary scaling
+        # Initialize to compensate for centroid norms so initial dictionary
+        # has approximately unit-norm atoms (matching standard SAE scale).
+        # Without this, raw centroid norms cause reconstruction to explode.
+        mean_norm = points.norm(dim=-1).mean()
+        init_mult = -torch.log(mean_norm + 1e-8).item()
         if use_multiplier:
             self.multiplier = nn.Parameter(
-                torch.tensor(0.0, device=device), requires_grad=True
+                torch.tensor(init_mult, device=device), requires_grad=True
             )
         else:
             self.register_buffer(
-                "multiplier", torch.tensor(0.0, device=device)
+                "multiplier", torch.tensor(init_mult, device=device)
             )
 
         self._fused_dictionary = None

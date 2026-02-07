@@ -88,6 +88,7 @@ def train_standard_sae(activations, device, seed):
         total_loss = mse_loss + aux_loss
         optimizer.zero_grad()
         total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
 
         with torch.no_grad():
@@ -131,6 +132,7 @@ def train_archetypal_sae(activations, anchor_points, device, seed):
         total_loss = mse_loss + aux_loss
         optimizer.zero_grad()
         total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
 
         if step % 500 == 0:
