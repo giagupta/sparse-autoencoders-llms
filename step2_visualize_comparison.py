@@ -24,7 +24,7 @@ from scipy import stats
 # ============================================================
 
 print("Loading monosemanticity results...")
-results = torch.load("monosemanticity_results.pt")
+results = torch.load("monosemanticity_results.pt", weights_only=False)
 arch_scores = results['archetypal']
 std_scores = results['standard']
 
@@ -156,7 +156,7 @@ print("Saved: monosemanticity_boxplots.png")
 
 if os.path.exists("stability_results.pt"):
     print("\nLoading stability results...")
-    stab_results = torch.load("stability_results.pt")
+    stab_results = torch.load("stability_results.pt", weights_only=False)
 
     std_stab = stab_results['std_stabilities']
     arch_stab = stab_results['arch_stabilities']

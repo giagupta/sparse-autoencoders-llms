@@ -18,9 +18,9 @@ if torch.backends.mps.is_available():
     device = "mps"
 
 # Load model
-anchor_points = torch.load("anchor_points.pt").to(device)
+anchor_points = torch.load("anchor_points.pt", weights_only=True).to(device)
 model = ArchetypalSAE(d_model=768, n_features=N_FEATURES, anchor_points=anchor_points, top_k=TOP_K).to(device)
-model.load_state_dict(torch.load("archetypal_sae_weights_v2.pt"))
+model.load_state_dict(torch.load("archetypal_sae_weights_v2.pt", weights_only=True))
 model.eval()
 
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2")

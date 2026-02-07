@@ -180,16 +180,16 @@ def main():
 
     # Load models
     print("\nLoading models...")
-    anchor_points = torch.load("anchor_points.pt").to(device)
+    anchor_points = torch.load("anchor_points.pt", weights_only=True).to(device)
 
     archetypal_sae = ArchetypalSAE(
         d_model=768, n_features=N_FEATURES, anchor_points=anchor_points, top_k=TOP_K
     ).to(device)
-    archetypal_sae.load_state_dict(torch.load("archetypal_sae_weights_v2.pt"))
+    archetypal_sae.load_state_dict(torch.load("archetypal_sae_weights_v2.pt", weights_only=True))
     archetypal_sae.eval()
 
     standard_sae = StandardSAE(d_model=768, n_features=N_FEATURES, top_k=TOP_K).to(device)
-    standard_sae.load_state_dict(torch.load("standard_sae_weights.pt"))
+    standard_sae.load_state_dict(torch.load("standard_sae_weights.pt", weights_only=True))
     standard_sae.eval()
 
     # Load GPT-2
