@@ -10,6 +10,7 @@ The stability evaluation (the paper's core contribution) is in a separate script
 (step2_stability_eval.py) since it requires training multiple seeds.
 """
 
+import time
 import torch
 import numpy as np
 from collections import defaultdict
@@ -88,7 +89,10 @@ def evaluate_model(model, model_name, gpt2, tokenizer, device, n_samples=500):
 
     dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", streaming=False)
 
-    for i, example in enumerate(dataset):
+    start_time = time.time()
+    processed = 0
+
+    for example in dataset:
         text = example["text"].strip()
         if len(text) < 50:
             continue
@@ -103,28 +107,36 @@ def evaluate_model(model, model_name, gpt2, tokenizer, device, n_samples=500):
             mse = torch.nn.functional.mse_loss(reconstruction, real_acts).item()
             mse_scores.append(mse)
 
-            # Collect per-feature statistics
-            for token_idx in range(codes.size(1)):
+            # Collect per-feature statistics efficiently: iterate only active codes.
+            # With TopK activations, this is dramatically faster than scanning all features.
+            code_slice = codes[0]  # (seq_len, n_features)
+            active_positions = torch.nonzero(code_slice > ACTIVATION_THRESHOLD, as_tuple=False)
+
+            for token_idx, feat_id in active_positions:
+                token_idx = token_idx.item()
+                feat_id = feat_id.item()
+                act_val = code_slice[token_idx, feat_id].item()
                 token_str = tokenizer.decode(inputs.input_ids[0, token_idx])
 
-                for feat_id in range(codes.size(-1)):
-                    act_val = codes[0, token_idx, feat_id].item()
+                feature_stats[feat_id]['token_activations'][token_str].append(act_val)
+                feature_stats[feat_id]['activation_count'] += 1
 
-                    if act_val > ACTIVATION_THRESHOLD:
-                        feature_stats[feat_id]['token_activations'][token_str].append(act_val)
-                        feature_stats[feat_id]['activation_count'] += 1
+                if act_val > 2.0 and len(feature_stats[feat_id]['contexts']) < 5:
+                    ctx_start = max(0, token_idx - 5)
+                    ctx_end = min(inputs.input_ids.size(1), token_idx + 5)
+                    context = tokenizer.decode(inputs.input_ids[0, ctx_start:ctx_end])
+                    feature_stats[feat_id]['contexts'].append(context)
 
-                        if act_val > 2.0 and len(feature_stats[feat_id]['contexts']) < 5:
-                            ctx_start = max(0, token_idx - 5)
-                            ctx_end = min(inputs.input_ids.size(1), token_idx + 5)
-                            context = tokenizer.decode(inputs.input_ids[0, ctx_start:ctx_end])
-                            feature_stats[feat_id]['contexts'].append(context)
-
-        if i % 50 == 0:
+        processed += 1
+        if processed % 50 == 0:
             active = len([f for f in feature_stats if feature_stats[f]['activation_count'] > 0])
-            print(f"  Processed {i} samples | Active features: {active} | Avg MSE: {np.mean(mse_scores):.6f}")
+            elapsed = time.time() - start_time
+            print(
+                f"  Processed {processed} samples | Active features: {active} | "
+                f"Avg MSE: {np.mean(mse_scores):.6f} | Elapsed: {elapsed:.1f}s"
+            )
 
-        if i >= n_samples:
+        if processed >= n_samples:
             break
 
     # Compute monosemanticity scores
