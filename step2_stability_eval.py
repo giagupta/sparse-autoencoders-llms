@@ -190,7 +190,7 @@ def main():
     activations = collect_training_data(gpt2, tokenizer, device, TRAINING_STEPS)
 
     # Load centroids for RA-SAE
-    anchor_points = torch.load("anchor_points.pt").to(device)
+    anchor_points = torch.load("anchor_points.pt", weights_only=True).to(device)
 
     # Train multiple seeds
     seeds = list(range(N_SEEDS))

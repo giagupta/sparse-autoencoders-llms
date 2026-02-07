@@ -38,7 +38,7 @@ print("STEP 3: Train Relaxed Archetypal SAE (RA-SAE)")
 print("=" * 60)
 
 # Load centroids (from step 1)
-anchor_points = torch.load("anchor_points.pt").to(device)
+anchor_points = torch.load("anchor_points.pt", weights_only=True).to(device)
 print(f"Loaded centroids: {anchor_points.shape}")
 
 # Initialize model
