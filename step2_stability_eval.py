@@ -39,7 +39,7 @@ AUX_LOSS_COEFF = 1/32
 def collect_training_data(gpt2, tokenizer, device, n_steps=3000):
     """Pre-collect activations to ensure identical data across seeds."""
     print("  Pre-collecting training activations...")
-    dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train", streaming=True)
+    dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train", streaming=False)
     activations = []
 
     for example in dataset:
@@ -238,7 +238,7 @@ def main():
 
     # Also compute reconstruction MSE for each model
     print("\nComputing reconstruction MSE on held-out data...")
-    eval_dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", streaming=True)
+    eval_dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", streaming=False)
     eval_acts = []
     for example in eval_dataset:
         text = example["text"].strip()

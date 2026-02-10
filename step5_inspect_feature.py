@@ -26,7 +26,7 @@ model.eval()
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 gpt2 = GPT2Model.from_pretrained("gpt2").to(device)
 gpt2.eval()
-dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", streaming=True)
+dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", streaming=False)
 
 print(f"--- Investigating Feature {FEATURE_TO_INSPECT} ---")
 results = []

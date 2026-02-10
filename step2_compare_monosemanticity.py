@@ -8,6 +8,7 @@ Standard SAE metrics:
 4. Reconstruction fidelity: cosine similarity between input and reconstruction
 """
 
+import time
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -47,9 +48,11 @@ def evaluate_model(model, model_name, gpt2, tokenizer, device, n_samples=500):
     all_x_var = []
     feature_fired = torch.zeros(N_FEATURES, device=device)
 
-    dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", streaming=True)
+    dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", streaming=False)
 
-    count = 0
+    start_time = time.time()
+    processed = 0
+
     for example in dataset:
         text = example["text"].strip()
         if len(text) < 50:
@@ -63,33 +66,37 @@ def evaluate_model(model, model_name, gpt2, tokenizer, device, n_samples=500):
 
             reconstruction, codes, _ = model(x)
 
-            # MSE
-            mse = F.mse_loss(reconstruction, x).item()
-            all_mse.append(mse)
+            # Collect per-feature statistics efficiently: iterate only active codes.
+            # With TopK activations, this is dramatically faster than scanning all features.
+            code_slice = codes[0]  # (seq_len, n_features)
+            active_positions = torch.nonzero(code_slice > ACTIVATION_THRESHOLD, as_tuple=False)
 
-            # Variance of input (for R^2)
-            x_var = x.var().item()
-            all_x_var.append(x_var)
+            for token_idx, feat_id in active_positions:
+                token_idx = token_idx.item()
+                feat_id = feat_id.item()
+                act_val = code_slice[token_idx, feat_id].item()
+                token_str = tokenizer.decode(inputs.input_ids[0, token_idx])
 
-            # L0: number of non-zero features per token
-            l0 = (codes > 0).float().sum(dim=-1).mean().item()
-            all_l0.append(l0)
+                feature_stats[feat_id]['token_activations'][token_str].append(act_val)
+                feature_stats[feat_id]['activation_count'] += 1
 
-            # Cosine similarity
-            cos = F.cosine_similarity(
-                reconstruction.reshape(-1, reconstruction.shape[-1]),
-                x.reshape(-1, x.shape[-1]),
-                dim=-1,
-            ).mean().item()
-            all_cosine.append(cos)
+                if act_val > 2.0 and len(feature_stats[feat_id]['contexts']) < 5:
+                    ctx_start = max(0, token_idx - 5)
+                    ctx_end = min(inputs.input_ids.size(1), token_idx + 5)
+                    context = tokenizer.decode(inputs.input_ids[0, ctx_start:ctx_end])
+                    feature_stats[feat_id]['contexts'].append(context)
 
-            # Track which features fired
-            fired = (codes.abs() > 0).any(dim=0).any(dim=0)  # (n_features,)
-            feature_fired += fired.float()
+        processed += 1
+        if processed % 50 == 0:
+            active = len([f for f in feature_stats if feature_stats[f]['activation_count'] > 0])
+            elapsed = time.time() - start_time
+            print(
+                f"  Processed {processed} samples | Active features: {active} | "
+                f"Avg MSE: {np.mean(mse_scores):.6f} | Elapsed: {elapsed:.1f}s"
+            )
 
-        count += 1
-        if count % 100 == 0:
-            print(f"  {count}/{n_samples} | MSE: {np.mean(all_mse):.4f} | L0: {np.mean(all_l0):.1f}")
+        if processed >= n_samples:
+            break
 
         if count >= n_samples:
             break
