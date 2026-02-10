@@ -66,9 +66,9 @@ while count < N_SAMPLES:
     ).to(device)
 
     with torch.no_grad():
-        outputs = model(inputs.input_ids)
-        # Extract Layer 9 MLP output
-        acts = model.h[LAYER].mlp(outputs.last_hidden_state)
+        outputs = model(inputs.input_ids, output_hidden_states=True)
+        # Extract residual stream after Layer 9
+        acts = outputs.hidden_states[LAYER + 1]
         # Flatten batch and sequence dims, move to CPU
         acts = acts.view(-1, acts.shape[-1]).cpu().numpy()
         all_activations.append(acts)
