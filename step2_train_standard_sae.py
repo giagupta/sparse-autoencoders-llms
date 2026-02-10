@@ -60,10 +60,10 @@ for example in dataset:
 
     inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=MAX_SEQ_LEN).to(device)
 
-    # Get activations from GPT-2 Layer 9
+    # Get residual stream activations from GPT-2 Layer 9
     with torch.no_grad():
-        outputs = gpt2(inputs.input_ids)
-        real_acts = gpt2.h[LAYER].mlp(outputs.last_hidden_state)
+        outputs = gpt2(inputs.input_ids, output_hidden_states=True)
+        real_acts = outputs.hidden_states[LAYER + 1]
 
     # Forward pass through SAE
     reconstruction, codes, pre_codes = model(real_acts)

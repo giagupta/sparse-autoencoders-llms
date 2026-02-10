@@ -49,8 +49,8 @@ def collect_training_data(gpt2, tokenizer, device, n_steps=3000):
 
         inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=MAX_SEQ_LEN).to(device)
         with torch.no_grad():
-            outputs = gpt2(inputs.input_ids)
-            real_acts = gpt2.h[LAYER].mlp(outputs.last_hidden_state)
+            outputs = gpt2(inputs.input_ids, output_hidden_states=True)
+            real_acts = outputs.hidden_states[LAYER + 1]
             activations.append(real_acts.cpu())
 
         if len(activations) >= n_steps:
@@ -246,8 +246,8 @@ def main():
             continue
         inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=MAX_SEQ_LEN).to(device)
         with torch.no_grad():
-            outputs = gpt2(inputs.input_ids)
-            real_acts = gpt2.h[LAYER].mlp(outputs.last_hidden_state)
+            outputs = gpt2(inputs.input_ids, output_hidden_states=True)
+            real_acts = outputs.hidden_states[LAYER + 1]
             eval_acts.append(real_acts)
         if len(eval_acts) >= 200:
             break

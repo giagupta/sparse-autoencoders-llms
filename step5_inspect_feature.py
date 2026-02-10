@@ -38,8 +38,8 @@ for i, example in enumerate(dataset):
 
     inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
     with torch.no_grad():
-        outputs = gpt2(inputs.input_ids)
-        real_acts = gpt2.h[LAYER].mlp(outputs.last_hidden_state)
+        outputs = gpt2(inputs.input_ids, output_hidden_states=True)
+        real_acts = outputs.hidden_states[LAYER + 1]
         _, codes, _ = model(real_acts)
 
     feat_acts = codes[0, :, FEATURE_TO_INSPECT]

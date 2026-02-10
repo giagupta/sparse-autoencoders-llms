@@ -58,8 +58,8 @@ def evaluate_model(model, model_name, gpt2, tokenizer, device, n_samples=500):
         inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(device)
 
         with torch.no_grad():
-            outputs = gpt2(inputs.input_ids)
-            x = gpt2.h[LAYER].mlp(outputs.last_hidden_state)
+            outputs = gpt2(inputs.input_ids, output_hidden_states=True)
+            x = outputs.hidden_states[LAYER + 1]
 
             reconstruction, codes, _ = model(x)
 
