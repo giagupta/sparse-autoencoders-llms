@@ -1,18 +1,16 @@
 """
-Evaluate and compare Archetypal SAE vs Standard SAE.
+Evaluate and compare RA-SAE vs Standard TopK SAE.
 
-Measures:
-1. Reconstruction quality (MSE on held-out data)
-2. Monosemanticity (token entropy, activation consistency)
-3. Feature utilization (dead features, activation frequency)
-
-The stability evaluation (the paper's core contribution) is in a separate script
-(step2_stability_eval.py) since it requires training multiple seeds.
+Standard SAE metrics:
+1. Reconstruction quality: MSE, variance explained (R^2)
+2. Sparsity: L0 (number of active features per token)
+3. Feature utilization: fraction of features that fire, dead features
+4. Reconstruction fidelity: cosine similarity between input and reconstruction
 """
 
 import torch
+import torch.nn.functional as F
 import numpy as np
-from collections import defaultdict
 from transformers import GPT2Model, GPT2Tokenizer
 from datasets import load_dataset
 from archetypal_sae import ArchetypalSAE
@@ -23,72 +21,36 @@ LAYER = 9
 N_FEATURES = 4096
 TOP_K = 64
 N_EVAL_SAMPLES = 500
-ACTIVATION_THRESHOLD = 0.1  # Consider feature "active" above this
-
-
-def compute_token_entropy(token_activations):
-    """
-    Compute entropy over token distribution for a feature.
-    Lower entropy = more monosemantic (fires on fewer token types).
-    """
-    if not token_activations:
-        return float('inf')
-
-    token_counts = {tok: len(acts) for tok, acts in token_activations.items()}
-    total = sum(token_counts.values())
-    if total == 0:
-        return float('inf')
-
-    probs = np.array([count / total for count in token_counts.values()])
-    entropy = -np.sum(probs * np.log(probs + 1e-10))
-    return entropy
-
-
-def compute_activation_consistency(token_activations):
-    """
-    Compute coefficient of variation for activation strengths.
-    Lower CoV = more consistent activation pattern.
-    """
-    all_acts = []
-    for acts in token_activations.values():
-        all_acts.extend(acts)
-
-    if len(all_acts) < 2:
-        return float('inf')
-
-    all_acts = np.array(all_acts)
-    mean_act = np.mean(all_acts)
-    std_act = np.std(all_acts)
-
-    if mean_act == 0:
-        return float('inf')
-
-    return std_act / mean_act
 
 
 def evaluate_model(model, model_name, gpt2, tokenizer, device, n_samples=500):
     """
-    Evaluate a single SAE model on reconstruction quality and monosemanticity.
+    Evaluate a single SAE on standard metrics.
 
     Returns dict with:
-      - mse_scores: list of per-sample MSE values
-      - feature_stats: per-feature activation statistics
-      - monosemanticity: per-feature monosemanticity scores
+      - mse: mean reconstruction MSE
+      - variance_explained: 1 - MSE/Var(x), i.e. R^2
+      - l0: mean number of active features per token position
+      - cosine_sim: mean cosine similarity between input and reconstruction
+      - feature_firing_rate: fraction of features that fire at least once
+      - dead_features: number of features that never fire
+      - mean_activation: mean activation magnitude of active features
     """
     print(f"\nEvaluating {model_name}...")
-    print("=" * 60)
+    print("-" * 50)
 
     model.eval()
-    mse_scores = []
-    feature_stats = defaultdict(lambda: {
-        'token_activations': defaultdict(list),
-        'activation_count': 0,
-        'contexts': []
-    })
+
+    all_mse = []
+    all_l0 = []
+    all_cosine = []
+    all_x_var = []
+    feature_fired = torch.zeros(N_FEATURES, device=device)
 
     dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", streaming=True)
 
-    for i, example in enumerate(dataset):
+    count = 0
+    for example in dataset:
         text = example["text"].strip()
         if len(text) < 50:
             continue
@@ -97,64 +59,67 @@ def evaluate_model(model, model_name, gpt2, tokenizer, device, n_samples=500):
 
         with torch.no_grad():
             outputs = gpt2(inputs.input_ids)
-            real_acts = gpt2.h[LAYER].mlp(outputs.last_hidden_state)
+            x = gpt2.h[LAYER].mlp(outputs.last_hidden_state)
 
-            reconstruction, codes, _ = model(real_acts)
-            mse = torch.nn.functional.mse_loss(reconstruction, real_acts).item()
-            mse_scores.append(mse)
+            reconstruction, codes, _ = model(x)
 
-            # Collect per-feature statistics
-            for token_idx in range(codes.size(1)):
-                token_str = tokenizer.decode(inputs.input_ids[0, token_idx])
+            # MSE
+            mse = F.mse_loss(reconstruction, x).item()
+            all_mse.append(mse)
 
-                for feat_id in range(codes.size(-1)):
-                    act_val = codes[0, token_idx, feat_id].item()
+            # Variance of input (for R^2)
+            x_var = x.var().item()
+            all_x_var.append(x_var)
 
-                    if act_val > ACTIVATION_THRESHOLD:
-                        feature_stats[feat_id]['token_activations'][token_str].append(act_val)
-                        feature_stats[feat_id]['activation_count'] += 1
+            # L0: number of non-zero features per token
+            l0 = (codes > 0).float().sum(dim=-1).mean().item()
+            all_l0.append(l0)
 
-                        if act_val > 2.0 and len(feature_stats[feat_id]['contexts']) < 5:
-                            ctx_start = max(0, token_idx - 5)
-                            ctx_end = min(inputs.input_ids.size(1), token_idx + 5)
-                            context = tokenizer.decode(inputs.input_ids[0, ctx_start:ctx_end])
-                            feature_stats[feat_id]['contexts'].append(context)
+            # Cosine similarity
+            cos = F.cosine_similarity(
+                reconstruction.reshape(-1, reconstruction.shape[-1]),
+                x.reshape(-1, x.shape[-1]),
+                dim=-1,
+            ).mean().item()
+            all_cosine.append(cos)
 
-        if i % 50 == 0:
-            active = len([f for f in feature_stats if feature_stats[f]['activation_count'] > 0])
-            print(f"  Processed {i} samples | Active features: {active} | Avg MSE: {np.mean(mse_scores):.6f}")
+            # Track which features fired
+            fired = (codes.abs() > 0).any(dim=0).any(dim=0)  # (n_features,)
+            feature_fired += fired.float()
 
-        if i >= n_samples:
+        count += 1
+        if count % 100 == 0:
+            print(f"  {count}/{n_samples} | MSE: {np.mean(all_mse):.4f} | L0: {np.mean(all_l0):.1f}")
+
+        if count >= n_samples:
             break
 
-    # Compute monosemanticity scores
-    mono_scores = {}
-    for feat_id, stats in feature_stats.items():
-        if stats['activation_count'] < 5:
-            continue
+    # Compute aggregate metrics
+    mean_mse = np.mean(all_mse)
+    mean_x_var = np.mean(all_x_var)
+    variance_explained = 1.0 - mean_mse / (mean_x_var + 1e-10)
+    n_alive = (feature_fired > 0).sum().item()
 
-        token_acts = stats['token_activations']
-        entropy = compute_token_entropy(token_acts)
-        consistency = compute_activation_consistency(token_acts)
-
-        if entropy == float('inf') or consistency == float('inf'):
-            continue
-
-        mono_scores[feat_id] = {
-            'token_entropy': entropy,
-            'activation_consistency': consistency,
-            'monosemanticity_score': entropy + consistency,
-            'activation_count': stats['activation_count'],
-            'unique_tokens': len(token_acts),
-            'sample_contexts': stats['contexts'][:3],
-        }
-
-    return {
-        'mse_scores': mse_scores,
-        'monosemanticity': mono_scores,
-        'n_active_features': len([f for f in feature_stats if feature_stats[f]['activation_count'] > 0]),
-        'n_dead_features': N_FEATURES - len([f for f in feature_stats if feature_stats[f]['activation_count'] > 0]),
+    results = {
+        'mse': mean_mse,
+        'mse_std': np.std(all_mse),
+        'variance_explained': variance_explained,
+        'l0': np.mean(all_l0),
+        'l0_std': np.std(all_l0),
+        'cosine_sim': np.mean(all_cosine),
+        'cosine_sim_std': np.std(all_cosine),
+        'alive_features': n_alive,
+        'dead_features': N_FEATURES - n_alive,
+        'feature_utilization': n_alive / N_FEATURES,
     }
+
+    print(f"  MSE:                {results['mse']:.4f} +/- {results['mse_std']:.4f}")
+    print(f"  Variance Explained: {results['variance_explained']:.4f}")
+    print(f"  L0:                 {results['l0']:.1f}")
+    print(f"  Cosine Similarity:  {results['cosine_sim']:.4f}")
+    print(f"  Alive Features:     {n_alive}/{N_FEATURES} ({results['feature_utilization']:.1%})")
+
+    return results
 
 
 def main():
@@ -180,82 +145,35 @@ def main():
     standard_sae.load_state_dict(torch.load("standard_sae_weights.pt", weights_only=True))
     standard_sae.eval()
 
-    # Load GPT-2
     tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
     gpt2 = GPT2Model.from_pretrained("gpt2").to(device)
     gpt2.eval()
 
-    # Evaluate both models
+    # Evaluate
     arch_results = evaluate_model(archetypal_sae, "RA-SAE (Archetypal)", gpt2, tokenizer, device, N_EVAL_SAMPLES)
     std_results = evaluate_model(standard_sae, "Standard TopK SAE", gpt2, tokenizer, device, N_EVAL_SAMPLES)
 
-    # Save raw results
+    # Save
     torch.save({
-        'archetypal': arch_results['monosemanticity'],
-        'standard': std_results['monosemanticity'],
-        'archetypal_mse': arch_results['mse_scores'],
-        'standard_mse': std_results['mse_scores'],
-        'archetypal_active': arch_results['n_active_features'],
-        'standard_active': std_results['n_active_features'],
-    }, "monosemanticity_results.pt")
+        'archetypal': arch_results,
+        'standard': std_results,
+    }, "eval_results.pt")
 
-    # Print summary
-    arch_scores = arch_results['monosemanticity']
-    std_scores = std_results['monosemanticity']
-
+    # Print comparison
     print(f"\n{'=' * 60}")
-    print("RESULTS SUMMARY")
+    print("COMPARISON SUMMARY")
     print(f"{'=' * 60}")
-
-    # Reconstruction quality
-    print(f"\nReconstruction Quality (MSE, lower is better):")
-    print(f"  RA-SAE:      {np.mean(arch_results['mse_scores']):.6f} +/- {np.std(arch_results['mse_scores']):.6f}")
-    print(f"  Standard:    {np.mean(std_results['mse_scores']):.6f} +/- {np.std(std_results['mse_scores']):.6f}")
-
-    # Feature utilization
-    print(f"\nFeature Utilization:")
-    print(f"  RA-SAE:      {arch_results['n_active_features']} active / {arch_results['n_dead_features']} dead")
-    print(f"  Standard:    {std_results['n_active_features']} active / {std_results['n_dead_features']} dead")
-
-    # Monosemanticity
-    arch_entropies = [s['token_entropy'] for s in arch_scores.values() if s['token_entropy'] < float('inf')]
-    std_entropies = [s['token_entropy'] for s in std_scores.values() if s['token_entropy'] < float('inf')]
-
-    arch_consistency = [s['activation_consistency'] for s in arch_scores.values() if s['activation_consistency'] < float('inf')]
-    std_consistency = [s['activation_consistency'] for s in std_scores.values() if s['activation_consistency'] < float('inf')]
-
-    if arch_entropies and std_entropies:
-        print(f"\nToken Entropy (lower = more monosemantic):")
-        print(f"  RA-SAE:      {np.mean(arch_entropies):.3f} +/- {np.std(arch_entropies):.3f}")
-        print(f"  Standard:    {np.mean(std_entropies):.3f} +/- {np.std(std_entropies):.3f}")
-
-    if arch_consistency and std_consistency:
-        print(f"\nActivation Consistency (lower = more consistent):")
-        print(f"  RA-SAE:      {np.mean(arch_consistency):.3f} +/- {np.std(arch_consistency):.3f}")
-        print(f"  Standard:    {np.mean(std_consistency):.3f} +/- {np.std(std_consistency):.3f}")
-
-    print(f"\nScored Features:")
-    print(f"  RA-SAE:      {len(arch_scores)}")
-    print(f"  Standard:    {len(std_scores)}")
-
-    # Top 5 most monosemantic features
-    print(f"\n{'=' * 60}")
-    print("TOP 5 MOST MONOSEMANTIC FEATURES")
+    print(f"{'Metric':<25} {'RA-SAE':>15} {'Standard':>15}")
+    print("-" * 60)
+    print(f"{'MSE':<25} {arch_results['mse']:>15.4f} {std_results['mse']:>15.4f}")
+    print(f"{'Var Explained (R^2)':<25} {arch_results['variance_explained']:>15.4f} {std_results['variance_explained']:>15.4f}")
+    print(f"{'L0 (sparsity)':<25} {arch_results['l0']:>15.1f} {std_results['l0']:>15.1f}")
+    print(f"{'Cosine Similarity':<25} {arch_results['cosine_sim']:>15.4f} {std_results['cosine_sim']:>15.4f}")
+    print(f"{'Alive Features':<25} {arch_results['alive_features']:>15.0f} {std_results['alive_features']:>15.0f}")
+    print(f"{'Dead Features':<25} {arch_results['dead_features']:>15.0f} {std_results['dead_features']:>15.0f}")
+    print(f"{'Feature Utilization':<25} {arch_results['feature_utilization']:>14.1%} {std_results['feature_utilization']:>14.1%}")
     print(f"{'=' * 60}")
-
-    for name, scores in [("RA-SAE", arch_scores), ("Standard", std_scores)]:
-        print(f"\n{name}:")
-        sorted_feats = sorted(scores.items(), key=lambda x: x[1]['monosemanticity_score'])[:5]
-        for feat_id, metrics in sorted_feats:
-            print(f"  Feature {feat_id}: entropy={metrics['token_entropy']:.3f}, "
-                  f"consistency={metrics['activation_consistency']:.3f}, "
-                  f"tokens={metrics['unique_tokens']}")
-            if metrics['sample_contexts']:
-                print(f"    Example: {metrics['sample_contexts'][0][:60]}...")
-
-    print(f"\n{'=' * 60}")
-    print("Results saved to: monosemanticity_results.pt")
-    print(f"{'=' * 60}")
+    print("Saved to: eval_results.pt")
 
 
 if __name__ == "__main__":

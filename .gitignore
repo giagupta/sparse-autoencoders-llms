@@ -4,5 +4,7 @@ archetypal_sae_weights_v2.pt
 anchor_points.pt
 standard_sae_weights.pt
 monosemanticity_results.pt
+eval_results.pt
 stability_results.pt
+ablation_results.pt
 *.png
