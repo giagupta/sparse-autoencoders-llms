@@ -12,9 +12,10 @@ Pipeline:
   1. Extract K-means centroids from GPT-2 activations
   2. Train Standard TopK SAE (baseline)
   3. Train RA-SAE (Relaxed Archetypal SAE)
-  4. Evaluate monosemanticity and reconstruction quality
+  4. Evaluate standard SAE metrics (MSE, R^2, L0, cosine sim, dead features)
   5. Evaluate dictionary stability across seeds
-  6. Generate comparison visualizations
+  6. Delta ablation (sweep relaxation parameter)
+  7. Generate comparison visualizations
 """
 
 import subprocess
@@ -55,9 +56,10 @@ def main():
     print("  1. Extract K-means centroids from GPT-2 Layer 9 activations")
     print("  2. Train Standard TopK SAE (baseline)")
     print("  3. Train RA-SAE (Relaxed Archetypal SAE)")
-    print("  4. Evaluate monosemanticity + reconstruction quality")
+    print("  4. Evaluate standard SAE metrics (MSE, R^2, L0, etc.)")
     print("  5. Evaluate dictionary stability (multi-seed)")
-    print("  6. Generate comparison visualizations")
+    print("  6. Delta ablation (sweep relaxation parameter)")
+    print("  7. Generate comparison visualizations")
     print(f"{'=' * 70}")
 
     # Step 1: Extract centroids
@@ -84,18 +86,20 @@ def main():
     else:
         print("\n[OK] archetypal_sae_weights_v2.pt found, skipping training")
 
-    # Step 4: Evaluate monosemanticity
-    if not run_script("step2_compare_monosemanticity.py", "Evaluate monosemanticity + reconstruction"):
+    # Step 4: Evaluate standard metrics
+    if not run_script("step2_compare_monosemanticity.py", "Evaluate standard SAE metrics"):
         print("\n[FAIL] Pipeline failed at evaluation")
         return
 
-    # Step 5: Stability evaluation (optional, slower)
-    run_stability = True
-    if run_stability:
-        if not run_script("step2_stability_eval.py", "Evaluate dictionary stability (multi-seed)"):
-            print("\n[WARN] Stability evaluation failed, continuing without it")
+    # Step 5: Stability evaluation (multi-seed, slower)
+    if not run_script("step2_stability_eval.py", "Evaluate dictionary stability (multi-seed)"):
+        print("\n[WARN] Stability evaluation failed, continuing without it")
 
-    # Step 6: Generate visualizations
+    # Step 6: Delta ablation (sweep relaxation parameter)
+    if not run_script("step2_delta_ablation.py", "Delta ablation (sweep relaxation parameter)"):
+        print("\n[WARN] Delta ablation failed, continuing without it")
+
+    # Step 7: Generate visualizations
     if not run_script("step2_visualize_comparison.py", "Generate comparison visualizations"):
         print("\n[FAIL] Pipeline failed at visualization")
         return
@@ -110,14 +114,17 @@ def main():
     print("    - standard_sae_weights.pt       (Standard TopK SAE)")
     print("    - archetypal_sae_weights_v2.pt  (RA-SAE)")
     print("  Results:")
-    print("    - monosemanticity_results.pt    (monosemanticity + MSE metrics)")
+    print("    - eval_results.pt               (standard SAE metrics)")
     if os.path.exists("stability_results.pt"):
         print("    - stability_results.pt          (dictionary stability)")
+    if os.path.exists("ablation_results.pt"):
+        print("    - ablation_results.pt           (delta ablation)")
     print("  Visualizations:")
-    print("    - monosemanticity_comparison.png")
-    print("    - monosemanticity_boxplots.png")
+    print("    - eval_comparison.png")
     if os.path.exists("stability_comparison.png"):
         print("    - stability_comparison.png")
+    if os.path.exists("delta_ablation_pareto.png"):
+        print("    - delta_ablation_pareto.png")
     print(f"{'=' * 70}")
 
 
