@@ -12,6 +12,7 @@ import time
 import torch
 import torch.nn.functional as F
 import numpy as np
+from collections import defaultdict
 from transformers import GPT2Model, GPT2Tokenizer
 from datasets import load_dataset
 from archetypal_sae import ArchetypalSAE
@@ -22,6 +23,7 @@ LAYER = 9
 N_FEATURES = 4096
 TOP_K = 64
 N_EVAL_SAMPLES = 500
+ACTIVATION_THRESHOLD = 0.1  # Consider feature "active" above this
 
 
 def evaluate_model(model, model_name, gpt2, tokenizer, device, n_samples=500):
@@ -47,6 +49,11 @@ def evaluate_model(model, model_name, gpt2, tokenizer, device, n_samples=500):
     all_cosine = []
     all_x_var = []
     feature_fired = torch.zeros(N_FEATURES, device=device)
+    feature_stats = defaultdict(lambda: {
+        'token_activations': defaultdict(list),
+        'activation_count': 0,
+        'contexts': []
+    })
 
     dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", streaming=False)
 
@@ -65,6 +72,14 @@ def evaluate_model(model, model_name, gpt2, tokenizer, device, n_samples=500):
             x = outputs.hidden_states[LAYER + 1]
 
             reconstruction, codes, _ = model(x)
+
+            # Compute metrics
+            mse = F.mse_loss(reconstruction, x).item()
+            all_mse.append(mse)
+            all_x_var.append(x.var().item())
+            all_l0.append((codes > 0).float().sum(-1).mean().item())
+            all_cosine.append(F.cosine_similarity(x, reconstruction, dim=-1).mean().item())
+            feature_fired += (codes > 0).any(dim=0).any(dim=0).float()
 
             # Collect per-feature statistics efficiently: iterate only active codes.
             # With TopK activations, this is dramatically faster than scanning all features.
@@ -92,13 +107,10 @@ def evaluate_model(model, model_name, gpt2, tokenizer, device, n_samples=500):
             elapsed = time.time() - start_time
             print(
                 f"  Processed {processed} samples | Active features: {active} | "
-                f"Avg MSE: {np.mean(mse_scores):.6f} | Elapsed: {elapsed:.1f}s"
+                f"Avg MSE: {np.mean(all_mse):.6f} | Elapsed: {elapsed:.1f}s"
             )
 
         if processed >= n_samples:
-            break
-
-        if count >= n_samples:
             break
 
     # Compute aggregate metrics
