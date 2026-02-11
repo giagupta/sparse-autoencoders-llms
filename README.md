@@ -69,6 +69,9 @@ python step2_delta_ablation.py
 
 # 7. Generate all comparison plots
 python step2_visualize_comparison.py
+
+# 8. Sanity-check saved results (flags likely failed runs)
+python step2_sanity_check_results.py
 ```
 
 ### Feature exploration
@@ -127,6 +130,7 @@ Pipeline:
   step2_stability_eval.py        Dictionary stability (multi-seed)
   step2_delta_ablation.py        Delta ablation (Pareto frontier)
   step2_visualize_comparison.py  Generate comparison plots
+  step2_sanity_check_results.py  Sanity-check metrics for failed/collapsed runs
 
 Feature Analysis:
   step4_explore_features.py      Scan for active features
