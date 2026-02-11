@@ -70,7 +70,7 @@ python step2_delta_ablation.py
 # 7. Generate all comparison plots
 python step2_visualize_comparison.py
 
-# 8. Sanity-check saved results (flags likely failed runs)
+# 8. Sanity-check saved results (flags likely failed runs + summarizes best ablation delta)
 python step2_sanity_check_results.py
 ```
 
