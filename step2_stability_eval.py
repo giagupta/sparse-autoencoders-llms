@@ -38,24 +38,29 @@ AUX_LOSS_COEFF = 1/32
 
 
 def collect_training_data(gpt2, tokenizer, device, n_steps=3000):
-    """Pre-collect activations to ensure identical data across seeds."""
+    """Pre-collect activations to ensure identical data across seeds.
+
+    Cycles through WikiText-2 multiple times if n_steps exceeds
+    the number of usable examples (~2500 with len >= 100).
+    """
     print("  Pre-collecting training activations...")
     dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train", streaming=False)
     activations = []
 
-    for example in dataset:
-        text = example["text"].strip()
-        if len(text) < 100:
-            continue
+    while len(activations) < n_steps:
+        for example in dataset:
+            text = example["text"].strip()
+            if len(text) < 100:
+                continue
 
-        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=MAX_SEQ_LEN).to(device)
-        with torch.no_grad():
-            outputs = gpt2(inputs.input_ids, output_hidden_states=True)
-            real_acts = outputs.hidden_states[LAYER + 1]
-            activations.append(real_acts.cpu())
+            inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=MAX_SEQ_LEN).to(device)
+            with torch.no_grad():
+                outputs = gpt2(inputs.input_ids, output_hidden_states=True)
+                real_acts = outputs.hidden_states[LAYER + 1]
+                activations.append(real_acts.cpu())
 
-        if len(activations) >= n_steps:
-            break
+            if len(activations) >= n_steps:
+                break
 
     print(f"  Collected {len(activations)} training samples")
     return activations

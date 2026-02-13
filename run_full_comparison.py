@@ -71,20 +71,14 @@ def main():
         print("\n[OK] anchor_points.pt found, skipping centroid extraction")
 
     # Step 2: Train Standard TopK SAE
-    if not os.path.exists("standard_sae_weights.pt"):
-        if not run_script("step2_train_standard_sae.py", "Train Standard TopK SAE"):
-            print("\n[FAIL] Pipeline failed at standard SAE training")
-            return
-    else:
-        print("\n[OK] standard_sae_weights.pt found, skipping training")
+    if not run_script("step2_train_standard_sae.py", "Train Standard TopK SAE"):
+        print("\n[FAIL] Pipeline failed at standard SAE training")
+        return
 
     # Step 3: Train RA-SAE
-    if not os.path.exists("archetypal_sae_weights_v2.pt"):
-        if not run_script("step3_train_sae.py", "Train RA-SAE"):
-            print("\n[FAIL] Pipeline failed at RA-SAE training")
-            return
-    else:
-        print("\n[OK] archetypal_sae_weights_v2.pt found, skipping training")
+    if not run_script("step3_train_sae.py", "Train RA-SAE"):
+        print("\n[FAIL] Pipeline failed at RA-SAE training")
+        return
 
     # Step 4: Evaluate standard metrics
     if not run_script("step2_compare_monosemanticity.py", "Evaluate standard SAE metrics"):
