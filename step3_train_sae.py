@@ -23,9 +23,10 @@ N_FEATURES = 4096
 TOP_K = 64                # Match the baseline
 DELTA = 1.0               # Relaxation parameter for Lambda constraint
 LR = 3e-4
-TRAINING_STEPS = 5000
+DICT_LR = 1e-3            # Higher LR for dictionary params (W, Lambda, multiplier)
+TRAINING_STEPS = 20000    # RA-SAE needs more steps: ~23M params vs ~6M for standard SAE
 MAX_SEQ_LEN = 128
-LOG_EVERY = 100
+LOG_EVERY = 500
 AUX_LOSS_COEFF = 1/32     # Auxiliary loss to reduce dead features
 
 # 1. Setup
@@ -50,7 +51,12 @@ model = ArchetypalSAE(
     delta=DELTA,
     use_multiplier=True,
 ).to(device)
-optimizer = optim.Adam(model.parameters(), lr=LR)
+# Use separate learning rates: the dictionary's W matrix (4096x4096 = 16M params)
+# has gradients diluted through the centroid matrix C, so it needs a higher LR.
+optimizer = optim.Adam([
+    {"params": [model.encoder.weight, model.encoder.bias], "lr": LR},
+    {"params": [model.dictionary.W, model.dictionary.Relax, model.dictionary.multiplier], "lr": DICT_LR},
+], lr=LR)
 
 # Load GPT-2 and dataset
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
@@ -64,7 +70,7 @@ dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train", streaming
 
 print(f"Device: {device}")
 print(f"Layer: {LAYER} | Features: {N_FEATURES} | TopK: {TOP_K} | Delta: {DELTA}")
-print(f"Learning rate: {LR} | Steps: {TRAINING_STEPS}")
+print(f"Encoder LR: {LR} | Dict LR: {DICT_LR} | Steps: {TRAINING_STEPS}")
 print("=" * 60)
 
 # Track dead features

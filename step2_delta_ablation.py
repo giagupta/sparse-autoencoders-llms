@@ -30,7 +30,8 @@ LAYER = 9
 N_FEATURES = 4096
 TOP_K = 64
 LR = 3e-4
-TRAINING_STEPS = 2000       # Shorter per-seed since we sweep many deltas
+DICT_LR = 1e-3              # Higher LR for RA-SAE dictionary params (W, Lambda, mult)
+TRAINING_STEPS = 8000       # RA-SAE needs sufficient steps to converge (23M params)
 MAX_SEQ_LEN = 128
 N_SEEDS = 2                 # 2 seeds per delta to measure stability
 AUX_LOSS_COEFF = 1 / 32
@@ -47,7 +48,10 @@ def train_rasae_for_ablation(activations, anchor_points, device, seed, delta):
         d_model=768, n_features=N_FEATURES, anchor_points=anchor_points,
         top_k=TOP_K, delta=delta, use_multiplier=True,
     ).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=LR)
+    optimizer = optim.Adam([
+        {"params": [model.encoder.weight, model.encoder.bias], "lr": LR},
+        {"params": [model.dictionary.W, model.dictionary.Relax, model.dictionary.multiplier], "lr": DICT_LR},
+    ], lr=LR)
     feature_activity = torch.zeros(N_FEATURES, device=device)
 
     for step, acts in enumerate(activations):
@@ -102,7 +106,7 @@ def main():
 
     # Collect held-out evaluation data
     print("\n  Collecting held-out evaluation data...")
-    eval_dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", streaming=True)
+    eval_dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", streaming=False)
     eval_acts = []
     for example in eval_dataset:
         text = example["text"].strip()
