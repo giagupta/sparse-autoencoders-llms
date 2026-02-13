@@ -19,9 +19,9 @@ LAYER = 9
 N_FEATURES = 4096
 TOP_K = 64                # ~1.5% sparsity (64 out of 4096)
 LR = 3e-4
-TRAINING_STEPS = 5000
+TRAINING_STEPS = 20000    # Match RA-SAE step count for fair comparison
 MAX_SEQ_LEN = 128
-LOG_EVERY = 100
+LOG_EVERY = 500
 AUX_LOSS_COEFF = 1/32     # Auxiliary loss to reduce dead features (from Gao et al. 2024)
 
 # 1. Setup

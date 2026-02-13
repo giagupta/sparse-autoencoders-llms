@@ -30,7 +30,8 @@ N_FEATURES = 4096
 TOP_K = 64
 DELTA = 1.0
 LR = 3e-4
-TRAINING_STEPS = 3000       # Shorter per-seed to make multi-seed feasible
+DICT_LR = 1e-3              # Higher LR for RA-SAE dictionary params (W, Lambda, mult)
+TRAINING_STEPS = 10000      # RA-SAE needs more steps to converge (23M params)
 MAX_SEQ_LEN = 128
 N_SEEDS = 3                 # Number of random seeds to evaluate stability
 AUX_LOSS_COEFF = 1/32
@@ -111,7 +112,10 @@ def train_archetypal_sae(activations, anchor_points, device, seed):
         d_model=768, n_features=N_FEATURES, anchor_points=anchor_points,
         top_k=TOP_K, delta=DELTA, use_multiplier=True,
     ).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=LR)
+    optimizer = optim.Adam([
+        {"params": [model.encoder.weight, model.encoder.bias], "lr": LR},
+        {"params": [model.dictionary.W, model.dictionary.Relax, model.dictionary.multiplier], "lr": DICT_LR},
+    ], lr=LR)
     feature_activity = torch.zeros(N_FEATURES, device=device)
 
     for step, acts in enumerate(activations):
@@ -135,7 +139,7 @@ def train_archetypal_sae(activations, anchor_points, device, seed):
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
 
-        if step % 500 == 0:
+        if step % 1000 == 0:
             print(f"    Seed {seed} | Step {step} | MSE: {mse_loss.item():.6f}")
 
     model.eval()
