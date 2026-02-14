@@ -56,12 +56,11 @@ class RelaxedArchetypalDictionary(nn.Module):
             torch.zeros(nb_concepts, self.in_dimensions, device=device)
         )
 
-        # Learnable multiplier for dictionary scaling
-        # Initialize to compensate for centroid norms so initial dictionary
-        # has approximately unit-norm atoms (matching standard SAE scale).
-        # Without this, raw centroid norms cause reconstruction to explode.
-        mean_norm = points.norm(dim=-1).mean()
-        init_mult = -torch.log(mean_norm + 1e-8).item()
+        # Learnable multiplier for dictionary scaling.
+        # With per-atom normalization the dictionary already has unit-norm
+        # rows, so we initialize the multiplier to 0 (exp(0) = 1, i.e.
+        # unit scale), matching the standard SAE initialization.
+        init_mult = 0.0
         if use_multiplier:
             self.multiplier = nn.Parameter(
                 torch.tensor(init_mult, device=device), requires_grad=True
@@ -74,7 +73,13 @@ class RelaxedArchetypalDictionary(nn.Module):
         self._fused_dictionary = None
 
     def get_dictionary(self):
-        """Compute the dictionary D = (W @ C + Lambda) * exp(multiplier)."""
+        """Compute the dictionary D = normalize(W @ C + Lambda) * exp(multiplier).
+
+        Each atom is normalized to unit norm before the global multiplier is
+        applied.  This ensures all atoms have equal reconstruction power,
+        preventing the dead-feature death spiral where high-norm atoms dominate
+        TopK selection and starve the rest of gradient signal.
+        """
         if self.training:
             # Project W to be row-stochastic (non-negative, rows sum to 1)
             with torch.no_grad():
@@ -88,6 +93,7 @@ class RelaxedArchetypalDictionary(nn.Module):
                 self.Relax.data = self.Relax.data * scaling_factor
 
             D = self.W @ self.C + self.Relax
+            D = F.normalize(D, dim=-1)
             return D * torch.exp(self.multiplier)
         else:
             assert self._fused_dictionary is not None, (
@@ -109,7 +115,8 @@ class RelaxedArchetypalDictionary(nn.Module):
                 norm_Lambda = self.Relax.norm(dim=-1, keepdim=True)
                 scaling_factor = torch.clamp(self.delta / (norm_Lambda + 1e-8), max=1.0)
                 Relax = self.Relax * scaling_factor
-                self._fused_dictionary = (W @ self.C + Relax) * torch.exp(self.multiplier)
+                D = F.normalize(W @ self.C + Relax, dim=-1)
+                self._fused_dictionary = D * torch.exp(self.multiplier)
         super().train(mode)
 
 
