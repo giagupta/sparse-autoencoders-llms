@@ -68,11 +68,14 @@ class StandardSAE(nn.Module):
             Sparse codes after ReLU + TopK.
         """
         pre_codes = self.encoder(x)
-        codes = F.relu(pre_codes)
 
-        # TopK: keep only the top_k largest activations, zero out the rest
-        topk_vals, topk_indices = torch.topk(codes, self.top_k, dim=-1)
-        codes = torch.zeros_like(codes).scatter(-1, topk_indices, topk_vals)
+        # TopK THEN ReLU: select top_k by raw pre-activation value, then
+        # clamp to non-negative.  This ensures exactly top_k features are
+        # considered, matching the canonical TopK SAE from Gao et al. (2024).
+        topk_vals, topk_indices = torch.topk(pre_codes, self.top_k, dim=-1)
+        codes = torch.zeros_like(pre_codes).scatter(
+            -1, topk_indices, F.relu(topk_vals)
+        )
 
         return pre_codes, codes
 

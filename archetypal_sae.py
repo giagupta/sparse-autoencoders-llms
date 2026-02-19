@@ -183,11 +183,16 @@ class ArchetypalSAE(nn.Module):
             Sparse codes after ReLU + TopK.
         """
         pre_codes = self.encoder(x)
-        codes = F.relu(pre_codes)
 
-        # TopK: keep only the top_k largest activations, zero out the rest
-        topk_vals, topk_indices = torch.topk(codes, self.top_k, dim=-1)
-        codes = torch.zeros_like(codes).scatter(-1, topk_indices, topk_vals)
+        # TopK THEN ReLU: select top_k by raw pre-activation value, then
+        # clamp to non-negative.  Applying ReLU first would zero out
+        # features before TopK can select them — with a constrained
+        # dictionary the encoder can push many pre_codes negative,
+        # causing L0 << top_k (e.g. 15 instead of 64).
+        topk_vals, topk_indices = torch.topk(pre_codes, self.top_k, dim=-1)
+        codes = torch.zeros_like(pre_codes).scatter(
+            -1, topk_indices, F.relu(topk_vals)
+        )
 
         return pre_codes, codes
 
