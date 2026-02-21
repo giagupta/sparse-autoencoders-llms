@@ -20,7 +20,7 @@ class StandardSAE(nn.Module):
 
     Architecture:
       Encode:  pre_codes = W_enc @ x + b_enc
-               codes = TopK(ReLU(pre_codes))
+               codes = TopK(pre_codes)
       Decode:  x_hat = codes @ D
                where D is a learned dictionary with unit-norm columns.
 
@@ -63,18 +63,18 @@ class StandardSAE(nn.Module):
         Returns
         -------
         pre_codes : Tensor
-            Pre-activation values (before ReLU and TopK).
+            Pre-activation values (before TopK).
         codes : Tensor
-            Sparse codes after ReLU + TopK.
+            Sparse codes after TopK.
         """
         pre_codes = self.encoder(x)
 
-        # TopK THEN ReLU: select top_k by raw pre-activation value, then
-        # clamp to non-negative.  This ensures exactly top_k features are
-        # considered, matching the canonical TopK SAE from Gao et al. (2024).
+        # TopK is the sole activation function (no ReLU), matching the
+        # canonical TopK SAE from Gao et al. (2024).  All top_k features
+        # always receive gradients, preventing feature collapse.
         topk_vals, topk_indices = torch.topk(pre_codes, self.top_k, dim=-1)
         codes = torch.zeros_like(pre_codes).scatter(
-            -1, topk_indices, F.relu(topk_vals)
+            -1, topk_indices, topk_vals
         )
 
         return pre_codes, codes

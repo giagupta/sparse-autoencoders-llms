@@ -124,7 +124,7 @@ while step < TRAINING_STEPS:
 
     # Logging
     if step % LOG_EVERY == 0:
-        l0 = (codes > 0).float().sum(-1).mean().item()
+        l0 = (codes != 0).float().sum(-1).mean().item()
         n_dead = (feature_activity < 0.01).sum().item()
         mult = model.dictionary.multiplier.item()
         print(

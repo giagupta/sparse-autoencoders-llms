@@ -126,7 +126,7 @@ class ArchetypalSAE(nn.Module):
 
     Architecture:
       Encode:  pre_codes = W_enc @ x + b_enc
-               codes = TopK(ReLU(pre_codes))
+               codes = TopK(pre_codes)
       Decode:  x_hat = codes @ D
                where D = (W @ C + Lambda) * exp(multiplier)
 
@@ -178,20 +178,25 @@ class ArchetypalSAE(nn.Module):
         Returns
         -------
         pre_codes : Tensor
-            Pre-activation values (before ReLU and TopK).
+            Pre-activation values (before TopK).
         codes : Tensor
-            Sparse codes after ReLU + TopK.
+            Sparse codes after TopK.
         """
         pre_codes = self.encoder(x)
 
-        # TopK THEN ReLU: select top_k by raw pre-activation value, then
-        # clamp to non-negative.  Applying ReLU first would zero out
-        # features before TopK can select them — with a constrained
-        # dictionary the encoder can push many pre_codes negative,
-        # causing L0 << top_k (e.g. 15 instead of 64).
+        # TopK is the sole activation function (no ReLU).
+        # ReLU creates a gradient dead zone: once a feature's pre_code goes
+        # negative, ReLU zeros it, the feature gets no gradient, and it can
+        # never revive.  With the constrained RA-SAE dictionary this causes
+        # L0 to collapse to ~15 instead of top_k=64.
+        #
+        # Without ReLU, all top_k features always get gradients.  The encoder
+        # naturally learns to produce positive codes because negative codes
+        # worsen reconstruction.  This matches Gao et al. (2024) where TopK
+        # alone provides sparsity.
         topk_vals, topk_indices = torch.topk(pre_codes, self.top_k, dim=-1)
         codes = torch.zeros_like(pre_codes).scatter(
-            -1, topk_indices, F.relu(topk_vals)
+            -1, topk_indices, topk_vals
         )
 
         return pre_codes, codes

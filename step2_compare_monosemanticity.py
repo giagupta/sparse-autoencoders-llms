@@ -77,9 +77,9 @@ def evaluate_model(model, model_name, gpt2, tokenizer, device, n_samples=500):
             mse = F.mse_loss(reconstruction, x).item()
             all_mse.append(mse)
             all_x_var.append(x.var().item())
-            all_l0.append((codes > 0).float().sum(-1).mean().item())
+            all_l0.append((codes != 0).float().sum(-1).mean().item())
             all_cosine.append(F.cosine_similarity(x, reconstruction, dim=-1).mean().item())
-            feature_fired += (codes > 0).any(dim=0).any(dim=0).float()
+            feature_fired += (codes != 0).any(dim=0).any(dim=0).float()
 
             # Collect per-feature statistics efficiently: iterate only active codes.
             # With TopK activations, this is dramatically faster than scanning all features.
